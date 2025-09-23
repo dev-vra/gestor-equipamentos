@@ -14,7 +14,150 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      colaboradores: {
+        Row: {
+          cargo: string | null
+          cnpj: string | null
+          cpf: string | null
+          created_at: string
+          id: string
+          nome: string
+          razao_social: string | null
+          updated_at: string
+        }
+        Insert: {
+          cargo?: string | null
+          cnpj?: string | null
+          cpf?: string | null
+          created_at?: string
+          id?: string
+          nome: string
+          razao_social?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cargo?: string | null
+          cnpj?: string | null
+          cpf?: string | null
+          created_at?: string
+          id?: string
+          nome?: string
+          razao_social?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      equipamentos: {
+        Row: {
+          avarias: string | null
+          canum: string | null
+          created_at: string
+          data_cadastro: string
+          descricao: string
+          epi: boolean | null
+          estado_conservacao: string | null
+          id: string
+          numero_serie: string | null
+          quantidade: number
+          tamanho: string | null
+          tipo: string
+          updated_at: string
+          validade: string | null
+        }
+        Insert: {
+          avarias?: string | null
+          canum?: string | null
+          created_at?: string
+          data_cadastro?: string
+          descricao: string
+          epi?: boolean | null
+          estado_conservacao?: string | null
+          id?: string
+          numero_serie?: string | null
+          quantidade?: number
+          tamanho?: string | null
+          tipo: string
+          updated_at?: string
+          validade?: string | null
+        }
+        Update: {
+          avarias?: string | null
+          canum?: string | null
+          created_at?: string
+          data_cadastro?: string
+          descricao?: string
+          epi?: boolean | null
+          estado_conservacao?: string | null
+          id?: string
+          numero_serie?: string | null
+          quantidade?: number
+          tamanho?: string | null
+          tipo?: string
+          updated_at?: string
+          validade?: string | null
+        }
+        Relationships: []
+      }
+      movimentacoes: {
+        Row: {
+          avarias: string | null
+          colaborador_id: string
+          created_at: string
+          data_movimentacao: string
+          data_prevista_devolucao: string | null
+          equipamento_id: string
+          estado_conservacao: string | null
+          grupo_retirada: string | null
+          id: string
+          quantidade: number
+          tipo: string
+          updated_at: string
+        }
+        Insert: {
+          avarias?: string | null
+          colaborador_id: string
+          created_at?: string
+          data_movimentacao?: string
+          data_prevista_devolucao?: string | null
+          equipamento_id: string
+          estado_conservacao?: string | null
+          grupo_retirada?: string | null
+          id?: string
+          quantidade: number
+          tipo: string
+          updated_at?: string
+        }
+        Update: {
+          avarias?: string | null
+          colaborador_id?: string
+          created_at?: string
+          data_movimentacao?: string
+          data_prevista_devolucao?: string | null
+          equipamento_id?: string
+          estado_conservacao?: string | null
+          grupo_retirada?: string | null
+          id?: string
+          quantidade?: number
+          tipo?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "movimentacoes_colaborador_id_fkey"
+            columns: ["colaborador_id"]
+            isOneToOne: false
+            referencedRelation: "colaboradores"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "movimentacoes_equipamento_id_fkey"
+            columns: ["equipamento_id"]
+            isOneToOne: false
+            referencedRelation: "equipamentos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

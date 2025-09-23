@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -6,23 +6,33 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { FileText, Package } from "lucide-react";
 import { Header } from "@/components/layout/Header";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface Movimentacao {
   id: string;
-  data_retirada: string;
-  funcionario: string;
-  item_id: string;
+  data_movimentacao: string;
+  colaborador_id: string;
+  equipamento_id: string;
   grupo_retirada: string;
-  quantidade_retirada: number;
+  quantidade: number;
+  colaboradores?: {
+    nome: string;
+  };
+  equipamentos?: {
+    tipo: string;
+    descricao: string;
+  };
 }
 
 interface EquipmentoDevolucao {
-  item_id: string;
+  movimentacao_id: string;
+  equipamento_id: string;
   tipo: string;
   descricao: string;
   numero_serie: string;
   estado_conservacao: string;
-  avaria: string;
+  avarias: string;
   quantidade: number;
 }
 
@@ -33,53 +43,156 @@ interface DevolucaoScreenProps {
 export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
   const [selectedRetirada, setSelectedRetirada] = useState<string>("");
   const [equipamentosDevolucao, setEquipamentosDevolucao] = useState<EquipmentoDevolucao[]>([]);
+  const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
+  const { toast } = useToast();
 
-  // Mock data - será substituído pela integração com Firebase
-  const movimentacoes: Movimentacao[] = [
-    { id: "1", data_retirada: "2024-01-15", funcionario: "João Silva", item_id: "1", grupo_retirada: "GRP001", quantidade_retirada: 2 },
-    { id: "2", data_retirada: "2024-01-16", funcionario: "Maria Santos", item_id: "2", grupo_retirada: "GRP002", quantidade_retirada: 1 },
-    { id: "3", data_retirada: "2024-01-17", funcionario: "Pedro Costa", item_id: "3", grupo_retirada: "GRP003", quantidade_retirada: 3 },
-  ];
+  useEffect(() => {
+    loadMovimentacoes();
+  }, []);
 
-  const handleSelectRetirada = (retiradaId: string) => {
-    setSelectedRetirada(retiradaId);
-    
-    // Mock data para equipamentos da retirada selecionada
-    const mockEquipamentos: EquipmentoDevolucao[] = [
-      {
-        item_id: "1",
-        tipo: "Capacete",
-        descricao: "Capacete de Segurança Branco",
-        numero_serie: "CAP001",
-        estado_conservacao: "Bom",
-        avaria: "",
-        quantidade: 2
-      },
-      {
-        item_id: "2",
-        tipo: "Óculos",
-        descricao: "Óculos de Proteção",
-        numero_serie: "OCU001",
-        estado_conservacao: "Bom",
-        avaria: "",
-        quantidade: 1
-      }
-    ];
-    
-    setEquipamentosDevolucao(mockEquipamentos);
+  const loadMovimentacoes = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('movimentacoes')
+        .select(`
+          *,
+          colaboradores:colaborador_id(nome),
+          equipamentos:equipamento_id(tipo, descricao)
+        `)
+        .eq('tipo', 'Retirada')
+        .order('data_movimentacao', { ascending: false });
+      
+      if (error) throw error;
+      setMovimentacoes(data || []);
+    } catch (error) {
+      console.error('Erro ao carregar movimentações:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar as movimentações.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const updateEquipamento = (itemId: string, field: keyof EquipmentoDevolucao, value: string) => {
+  const handleSelectRetirada = async (retiradaId: string) => {
+    setSelectedRetirada(retiradaId);
+    
+    try {
+      // Buscar equipamentos da movimentação selecionada
+      const { data, error } = await supabase
+        .from('movimentacoes')
+        .select(`
+          id,
+          equipamento_id,
+          quantidade,
+          equipamentos:equipamento_id(tipo, descricao, numero_serie)
+        `)
+        .eq('id', retiradaId);
+      
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        const equipamentos: EquipmentoDevolucao[] = data.map(item => ({
+          movimentacao_id: item.id,
+          equipamento_id: item.equipamento_id,
+          tipo: item.equipamentos?.tipo || '',
+          descricao: item.equipamentos?.descricao || '',
+          numero_serie: item.equipamentos?.numero_serie || '',
+          estado_conservacao: 'Bom',
+          avarias: '',
+          quantidade: item.quantidade,
+        }));
+        
+        setEquipamentosDevolucao(equipamentos);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar equipamentos da retirada:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar os equipamentos da retirada.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const updateEquipamento = (equipamentoId: string, field: keyof EquipmentoDevolucao, value: string) => {
     setEquipamentosDevolucao(prev =>
       prev.map(eq =>
-        eq.item_id === itemId ? { ...eq, [field]: value } : eq
+        eq.equipamento_id === equipamentoId ? { ...eq, [field]: value } : eq
       )
     );
   };
 
-  const handleRegistrarDevolucao = () => {
-    // Implementar geração de PDF baseado no template de devolução
-    console.log("Registrar devolução:", { selectedRetirada, equipamentosDevolucao });
+  const handleRegistrarDevolucao = async () => {
+    if (!selectedRetirada || equipamentosDevolucao.length === 0) {
+      toast({
+        title: "Erro",
+        description: "Selecione uma retirada e configure os equipamentos.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Criar movimentações de devolução
+      const devolucoes = equipamentosDevolucao.map(eq => ({
+        tipo: 'Devolucao',
+        colaborador_id: movimentacoes.find(m => m.id === selectedRetirada)?.colaborador_id,
+        equipamento_id: eq.equipamento_id,
+        grupo_retirada: movimentacoes.find(m => m.id === selectedRetirada)?.grupo_retirada,
+        quantidade: eq.quantidade,
+        estado_conservacao: eq.estado_conservacao,
+        avarias: eq.avarias,
+      }));
+
+      const { error: devolucaoError } = await supabase
+        .from('movimentacoes')
+        .insert(devolucoes);
+
+      if (devolucaoError) throw devolucaoError;
+
+      // Atualizar estoque dos equipamentos
+      for (const eq of equipamentosDevolucao) {
+        // Buscar quantidade atual do equipamento
+        const { data: equipData, error: equipError } = await supabase
+          .from('equipamentos')
+          .select('quantidade')
+          .eq('id', eq.equipamento_id)
+          .single();
+
+        if (equipError) throw equipError;
+
+        // Atualizar quantidade
+        const { error: updateError } = await supabase
+          .from('equipamentos')
+          .update({ 
+            quantidade: equipData.quantidade + eq.quantidade,
+            estado_conservacao: eq.estado_conservacao,
+            avarias: eq.avarias
+          })
+          .eq('id', eq.equipamento_id);
+
+        if (updateError) throw updateError;
+      }
+
+      toast({
+        title: "Sucesso",
+        description: "Devolução registrada com sucesso!",
+      });
+
+      // Reset form
+      handleCancelar();
+      
+      // Recarregar movimentações
+      await loadMovimentacoes();
+    } catch (error) {
+      console.error('Erro ao registrar devolução:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível registrar a devolução.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleCancelar = () => {
@@ -107,7 +220,7 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
                     <TableHead>ID</TableHead>
                     <TableHead>Data Retirada</TableHead>
                     <TableHead>Funcionário</TableHead>
-                    <TableHead>Item ID</TableHead>
+                    <TableHead>Equipamento</TableHead>
                     <TableHead>Grupo Retirada</TableHead>
                     <TableHead>Quantidade</TableHead>
                     <TableHead>Ação</TableHead>
@@ -119,12 +232,12 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
                       key={movimentacao.id}
                       className={selectedRetirada === movimentacao.id ? "bg-primary/5 border-primary/20" : ""}
                     >
-                      <TableCell className="font-medium">{movimentacao.id}</TableCell>
-                      <TableCell>{new Date(movimentacao.data_retirada).toLocaleDateString('pt-BR')}</TableCell>
-                      <TableCell>{movimentacao.funcionario}</TableCell>
-                      <TableCell>{movimentacao.item_id}</TableCell>
+                      <TableCell className="font-medium">{movimentacao.id.slice(0, 8)}</TableCell>
+                      <TableCell>{new Date(movimentacao.data_movimentacao).toLocaleDateString('pt-BR')}</TableCell>
+                      <TableCell>{movimentacao.colaboradores?.nome}</TableCell>
+                      <TableCell>{movimentacao.equipamentos?.tipo}</TableCell>
                       <TableCell>{movimentacao.grupo_retirada}</TableCell>
-                      <TableCell>{movimentacao.quantidade_retirada}</TableCell>
+                      <TableCell>{movimentacao.quantidade}</TableCell>
                       <TableCell>
                         <Button 
                           size="sm"
@@ -152,7 +265,6 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Item ID</TableHead>
                       <TableHead>Tipo</TableHead>
                       <TableHead>Descrição</TableHead>
                       <TableHead>Nº Série</TableHead>
@@ -163,15 +275,14 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
                   </TableHeader>
                   <TableBody>
                     {equipamentosDevolucao.map((equipamento) => (
-                      <TableRow key={equipamento.item_id}>
-                        <TableCell className="font-medium">{equipamento.item_id}</TableCell>
-                        <TableCell>{equipamento.tipo}</TableCell>
+                      <TableRow key={equipamento.equipamento_id}>
+                        <TableCell className="font-medium">{equipamento.tipo}</TableCell>
                         <TableCell>{equipamento.descricao}</TableCell>
                         <TableCell>{equipamento.numero_serie}</TableCell>
                         <TableCell>
                           <Select 
                             value={equipamento.estado_conservacao}
-                            onValueChange={(value) => updateEquipamento(equipamento.item_id, 'estado_conservacao', value)}
+                            onValueChange={(value) => updateEquipamento(equipamento.equipamento_id, 'estado_conservacao', value)}
                           >
                             <SelectTrigger className="w-32">
                               <SelectValue />
@@ -186,8 +297,8 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
                         <TableCell>
                           <Textarea
                             placeholder="Descreva avarias..."
-                            value={equipamento.avaria}
-                            onChange={(e) => updateEquipamento(equipamento.item_id, 'avaria', e.target.value)}
+                            value={equipamento.avarias}
+                            onChange={(e) => updateEquipamento(equipamento.equipamento_id, 'avarias', e.target.value)}
                             className="min-h-20 w-48"
                           />
                         </TableCell>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Edit, Trash2, Shield, Search } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface Equipamento {
   id: string;
@@ -26,34 +28,8 @@ interface Equipamento {
 }
 
 export function EquipamentosTab() {
-  const [equipamentos, setEquipamentos] = useState<Equipamento[]>([
-    {
-      id: "1",
-      tipo: "Capacete",
-      descricao: "Capacete de Segurança Branco",
-      numero_serie: "CAP001",
-      estado_conservacao: "Bom",
-      avarias: "",
-      quantidade: 15,
-      data_cadastro: "2024-01-15",
-      epi: true,
-      canum: "12345",
-      tamanho: "Único",
-      validade: "2025-12-31"
-    },
-    {
-      id: "2",
-      tipo: "Notebook",
-      descricao: "Notebook Dell Inspiron",
-      numero_serie: "NOT001",
-      estado_conservacao: "Bom",
-      avarias: "",
-      quantidade: 5,
-      data_cadastro: "2024-01-16",
-      epi: false
-    }
-  ]);
-
+  const [equipamentos, setEquipamentos] = useState<Equipamento[]>([]);
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingEquipamento, setEditingEquipamento] = useState<Equipamento | null>(null);
@@ -71,10 +47,34 @@ export function EquipamentosTab() {
     validade: ""
   });
 
+  // Carregar equipamentos do Supabase ao montar o componente
+  useEffect(() => {
+    loadEquipamentos();
+  }, []);
+
+  const loadEquipamentos = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('equipamentos')
+        .select('*')
+        .order('tipo');
+      
+      if (error) throw error;
+      setEquipamentos(data || []);
+    } catch (error) {
+      console.error('Erro ao carregar equipamentos:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar os equipamentos.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const filteredEquipamentos = equipamentos.filter(eq => 
     eq.tipo.toLowerCase().includes(searchTerm.toLowerCase()) ||
     eq.descricao.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    eq.numero_serie.toLowerCase().includes(searchTerm.toLowerCase())
+    eq.numero_serie?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const resetForm = () => {
@@ -93,28 +93,57 @@ export function EquipamentosTab() {
     setEditingEquipamento(null);
   };
 
-  const handleSubmit = () => {
-    if (editingEquipamento) {
-      // Editar equipamento existente
-      setEquipamentos(prev =>
-        prev.map(eq =>
-          eq.id === editingEquipamento.id
-            ? { ...eq, ...formData }
-            : eq
-        )
-      );
-    } else {
-      // Adicionar novo equipamento
-      const newEquipamento: Equipamento = {
-        id: Date.now().toString(),
-        data_cadastro: new Date().toISOString().split('T')[0],
-        ...formData as Equipamento
-      };
-      setEquipamentos(prev => [...prev, newEquipamento]);
+  const handleSubmit = async () => {
+    try {
+      if (editingEquipamento) {
+        // Editar equipamento existente
+        const { error } = await supabase
+          .from('equipamentos')
+          .update(formData)
+          .eq('id', editingEquipamento.id);
+          
+        if (error) throw error;
+        
+        toast({
+          title: "Sucesso",
+          description: "Equipamento atualizado com sucesso!",
+        });
+      } else {
+        // Adicionar novo equipamento
+        if (!formData.tipo || !formData.descricao) {
+          toast({
+            title: "Erro",
+            description: "Tipo e descrição são obrigatórios.",
+            variant: "destructive",
+          });
+          return;
+        }
+        
+        const { error } = await supabase
+          .from('equipamentos')
+          .insert([formData as any]);
+          
+        if (error) throw error;
+        
+        toast({
+          title: "Sucesso",
+          description: "Equipamento adicionado com sucesso!",
+        });
+      }
+      
+      // Recarregar a lista
+      await loadEquipamentos();
+      
+      setIsDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Erro ao salvar equipamento:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível salvar o equipamento.",
+        variant: "destructive",
+      });
     }
-    
-    setIsDialogOpen(false);
-    resetForm();
   };
 
   const handleEdit = (equipamento: Equipamento) => {
@@ -123,8 +152,30 @@ export function EquipamentosTab() {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    setEquipamentos(prev => prev.filter(eq => eq.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('equipamentos')
+        .delete()
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      toast({
+        title: "Sucesso",
+        description: "Equipamento excluído com sucesso!",
+      });
+      
+      // Recarregar a lista
+      await loadEquipamentos();
+    } catch (error) {
+      console.error('Erro ao excluir equipamento:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível excluir o equipamento.",
+        variant: "destructive",
+      });
+    }
   };
 
   const openAddDialog = () => {

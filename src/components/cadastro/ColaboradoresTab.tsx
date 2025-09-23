@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Plus, Edit, Trash2, Search, User } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface Colaborador {
   id: string;
@@ -16,25 +18,8 @@ interface Colaborador {
 }
 
 export function ColaboradoresTab() {
-  const [colaboradores, setColaboradores] = useState<Colaborador[]>([
-    {
-      id: "1",
-      nome: "João Silva",
-      cpf: "123.456.789-00",
-      cargo: "Engenheiro",
-      cnpj: "12.345.678/0001-90",
-      razao_social: "Empresa ABC Ltda"
-    },
-    {
-      id: "2",
-      nome: "Maria Santos",
-      cpf: "987.654.321-00",
-      cargo: "Técnica",
-      cnpj: "98.765.432/0001-10",
-      razao_social: "Empresa XYZ S.A."
-    }
-  ]);
-
+  const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingColaborador, setEditingColaborador] = useState<Colaborador | null>(null);
@@ -47,11 +32,35 @@ export function ColaboradoresTab() {
     razao_social: ""
   });
 
+  // Carregar colaboradores do Supabase ao montar o componente
+  useEffect(() => {
+    loadColaboradores();
+  }, []);
+
+  const loadColaboradores = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('colaboradores')
+        .select('*')
+        .order('nome');
+      
+      if (error) throw error;
+      setColaboradores(data || []);
+    } catch (error) {
+      console.error('Erro ao carregar colaboradores:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar os colaboradores.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const filteredColaboradores = colaboradores.filter(col => 
     col.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    col.cpf.includes(searchTerm) ||
-    col.cargo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    col.razao_social.toLowerCase().includes(searchTerm.toLowerCase())
+    col.cpf?.includes(searchTerm) ||
+    col.cargo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    col.razao_social?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const resetForm = () => {
@@ -65,27 +74,57 @@ export function ColaboradoresTab() {
     setEditingColaborador(null);
   };
 
-  const handleSubmit = () => {
-    if (editingColaborador) {
-      // Editar colaborador existente
-      setColaboradores(prev =>
-        prev.map(col =>
-          col.id === editingColaborador.id
-            ? { ...col, ...formData }
-            : col
-        )
-      );
-    } else {
-      // Adicionar novo colaborador
-      const newColaborador: Colaborador = {
-        id: Date.now().toString(),
-        ...formData as Colaborador
-      };
-      setColaboradores(prev => [...prev, newColaborador]);
+  const handleSubmit = async () => {
+    try {
+      if (editingColaborador) {
+        // Editar colaborador existente
+        const { error } = await supabase
+          .from('colaboradores')
+          .update(formData)
+          .eq('id', editingColaborador.id);
+          
+        if (error) throw error;
+        
+        toast({
+          title: "Sucesso",
+          description: "Colaborador atualizado com sucesso!",
+        });
+      } else {
+        // Adicionar novo colaborador
+        if (!formData.nome) {
+          toast({
+            title: "Erro",
+            description: "Nome é obrigatório.",
+            variant: "destructive",
+          });
+          return;
+        }
+        
+        const { error } = await supabase
+          .from('colaboradores')
+          .insert([formData as any]);
+          
+        if (error) throw error;
+        
+        toast({
+          title: "Sucesso",
+          description: "Colaborador adicionado com sucesso!",
+        });
+      }
+      
+      // Recarregar a lista
+      await loadColaboradores();
+      
+      setIsDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Erro ao salvar colaborador:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível salvar o colaborador.",
+        variant: "destructive",
+      });
     }
-    
-    setIsDialogOpen(false);
-    resetForm();
   };
 
   const handleEdit = (colaborador: Colaborador) => {
@@ -94,8 +133,30 @@ export function ColaboradoresTab() {
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    setColaboradores(prev => prev.filter(col => col.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('colaboradores')
+        .delete()
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      toast({
+        title: "Sucesso",
+        description: "Colaborador excluído com sucesso!",
+      });
+      
+      // Recarregar a lista
+      await loadColaboradores();
+    } catch (error) {
+      console.error('Erro ao excluir colaborador:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível excluir o colaborador.",
+        variant: "destructive",
+      });
+    }
   };
 
   const openAddDialog = () => {

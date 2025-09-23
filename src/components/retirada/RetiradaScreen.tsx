@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,14 +7,22 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Plus, Minus, FileText, Shield, Search } from "lucide-react";
 import { Header } from "@/components/layout/Header";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface Equipment {
   id: string;
   tipo: string;
   descricao: string;
   numero_serie: string;
-  estoque: number;
+  quantidade: number;
   epi: boolean;
+}
+
+interface Colaborador {
+  id: string;
+  nome: string;
+  cargo: string;
 }
 
 interface RetiradaScreenProps {
@@ -26,25 +34,47 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
   const [selectedEmployee, setSelectedEmployee] = useState("");
   const [returnDate, setReturnDate] = useState("");
   const [selectedEquipments, setSelectedEquipments] = useState<{id: string, quantity: number}[]>([]);
+  const [equipments, setEquipments] = useState<Equipment[]>([]);
+  const [colaboradores, setColaboradores] = useState<Colaborador[]>([]);
+  const { toast } = useToast();
 
-  // Mock data - será substituído pela integração com Firebase
-  const equipments: Equipment[] = [
-    { id: "1", tipo: "Capacete", descricao: "Capacete de Segurança Branco", numero_serie: "CAP001", estoque: 15, epi: true },
-    { id: "2", tipo: "Óculos", descricao: "Óculos de Proteção", numero_serie: "OCU001", estoque: 20, epi: true },
-    { id: "3", tipo: "Luvas", descricao: "Luvas de Couro", numero_serie: "LUV001", estoque: 30, epi: true },
-    { id: "4", tipo: "Notebook", descricao: "Notebook Dell Inspiron", numero_serie: "NOT001", estoque: 5, epi: false },
-  ];
+  useEffect(() => {
+    loadData();
+  }, []);
 
-  const employees = [
-    { id: "1", nome: "João Silva", cargo: "Engenheiro" },
-    { id: "2", nome: "Maria Santos", cargo: "Técnica" },
-    { id: "3", nome: "Pedro Costa", cargo: "Operador" },
-  ];
+  const loadData = async () => {
+    try {
+      // Carregar equipamentos
+      const { data: equipmentData, error: equipmentError } = await supabase
+        .from('equipamentos')
+        .select('id, tipo, descricao, numero_serie, quantidade, epi')
+        .gt('quantidade', 0);
+      
+      if (equipmentError) throw equipmentError;
+      setEquipments(equipmentData || []);
+
+      // Carregar colaboradores
+      const { data: colaboradorData, error: colaboradorError } = await supabase
+        .from('colaboradores')
+        .select('id, nome, cargo')
+        .order('nome');
+      
+      if (colaboradorError) throw colaboradorError;
+      setColaboradores(colaboradorData || []);
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível carregar os dados.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const filteredEquipments = equipments.filter(eq => 
     eq.tipo.toLowerCase().includes(searchTerm.toLowerCase()) ||
     eq.descricao.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    eq.numero_serie.toLowerCase().includes(searchTerm.toLowerCase())
+    eq.numero_serie?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const addEquipment = (equipmentId: string) => {
@@ -54,7 +84,7 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
     if (!equipment) return;
     
     if (existing) {
-      if (existing.quantity < equipment.estoque) {
+      if (existing.quantity < equipment.quantidade) {
         setSelectedEquipments(prev => 
           prev.map(item => 
             item.id === equipmentId 
@@ -92,14 +122,76 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
     }).filter(Boolean);
   };
 
-  const handleRegistrarRetirada = () => {
-    // Implementar geração de PDF baseado no template
-    console.log("Registrar retirada:", { selectedEmployee, returnDate, selectedEquipments });
+  const handleRegistrarRetirada = async () => {
+    if (!selectedEmployee || selectedEquipments.length === 0 || !returnDate) {
+      toast({
+        title: "Erro",
+        description: "Preencha todos os campos obrigatórios.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const grupoRetirada = `GRP_${Date.now()}`;
+      
+      // Criar movimentações para cada equipamento
+      const movimentacoes = selectedEquipments.map(selected => ({
+        tipo: 'Retirada',
+        colaborador_id: selectedEmployee,
+        equipamento_id: selected.id,
+        grupo_retirada: grupoRetirada,
+        quantidade: selected.quantity,
+        data_prevista_devolucao: returnDate,
+      }));
+
+      const { error: movError } = await supabase
+        .from('movimentacoes')
+        .insert(movimentacoes);
+
+      if (movError) throw movError;
+
+      // Atualizar estoque dos equipamentos
+      for (const selected of selectedEquipments) {
+        const { error: updateError } = await supabase
+          .from('equipamentos')
+          .update({ 
+            quantidade: equipments.find(eq => eq.id === selected.id)!.quantidade - selected.quantity 
+          })
+          .eq('id', selected.id);
+
+        if (updateError) throw updateError;
+      }
+
+      toast({
+        title: "Sucesso",
+        description: "Retirada registrada com sucesso!",
+      });
+
+      // Reset form
+      setSelectedEmployee("");
+      setReturnDate("");
+      setSelectedEquipments([]);
+      
+      // Recarregar equipamentos
+      await loadData();
+    } catch (error) {
+      console.error('Erro ao registrar retirada:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível registrar a retirada.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleEntregaEPI = () => {
-    // Implementar geração de PDF EPI baseado no template
+    // Para implementar geração de PDF EPI
     console.log("Entrega EPI:", { selectedEmployee, returnDate, selectedEquipments });
+    toast({
+      title: "Info",
+      description: "Geração de PDF EPI será implementada em breve.",
+    });
   };
 
   return (
@@ -128,7 +220,6 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>ID</TableHead>
                         <TableHead>Tipo</TableHead>
                         <TableHead>Descrição</TableHead>
                         <TableHead>Nº Série</TableHead>
@@ -140,11 +231,10 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
                     <TableBody>
                       {filteredEquipments.map((equipment) => (
                         <TableRow key={equipment.id}>
-                          <TableCell className="font-medium">{equipment.id}</TableCell>
-                          <TableCell>{equipment.tipo}</TableCell>
+                          <TableCell className="font-medium">{equipment.tipo}</TableCell>
                           <TableCell>{equipment.descricao}</TableCell>
                           <TableCell>{equipment.numero_serie}</TableCell>
-                          <TableCell>{equipment.estoque}</TableCell>
+                          <TableCell>{equipment.quantidade}</TableCell>
                           <TableCell>
                             {equipment.epi ? (
                               <Badge variant="secondary" className="bg-primary/10 text-primary">
@@ -159,7 +249,7 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
                             <Button 
                               size="sm" 
                               onClick={() => addEquipment(equipment.id)}
-                              disabled={equipment.estoque === 0}
+                              disabled={equipment.quantidade === 0}
                             >
                               <Plus className="h-4 w-4" />
                             </Button>
@@ -187,7 +277,7 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
                         <SelectValue placeholder="Selecione o colaborador" />
                       </SelectTrigger>
                       <SelectContent>
-                        {employees.map((employee) => (
+                        {colaboradores.map((employee) => (
                           <SelectItem key={employee.id} value={employee.id}>
                             {employee.nome} - {employee.cargo}
                           </SelectItem>
@@ -247,7 +337,7 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
               <Button 
                 className="w-full" 
                 onClick={handleRegistrarRetirada}
-                disabled={!selectedEmployee || selectedEquipments.length === 0}
+                disabled={!selectedEmployee || selectedEquipments.length === 0 || !returnDate}
               >
                 <FileText className="h-4 w-4 mr-2" />
                 Registrar Retirada
