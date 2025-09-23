@@ -9,7 +9,7 @@ import { Plus, Minus, FileText, Shield, Search } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { generateTermoRetirada, generateTermoDevolucao, generateTermoEntregaEPI } from "@/services/documentService";
+import { generateTermoRetirada } from "@/services/documentService";
 
 interface Equipment {
   id: string;
@@ -78,7 +78,6 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
   // Filtrar equipamentos
   useEffect(() => {
     if (searchTerm.trim() === '') {
-      setFilteredEquipments(equipments);
     } else {
       const filtered = equipments.filter(
         (equip) =>
@@ -95,68 +94,7 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
     if (!equipment) return;
 
     setSelectedEquipments((prev) => {
-      const existing = prev.find((item) => item.id === equipmentId);
-      if (existing) {
-        if (existing.quantity < equipment.quantidade) {
-          return prev.map((item) =>
-            item.id === equipmentId
-              ? { ...item, quantity: item.quantity + 1 }
-              : item
-          );
-        }
-        return prev;
-      } else {
-        return [...prev, { id: equipmentId, quantity: 1 }];
-      }
-    });
-  };
-
-  const handleRegistrarRetirada = async () => {
-    if (!selectedEmployee || selectedEquipments.length === 0 || !returnDate) {
-      toast({
-        title: 'Erro',
-        description: 'Preencha todos os campos obrigatórios.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      const grupoRetirada = `GRP_${Date.now()}`;
-      
-      // Criar movimentações para cada equipamento
-      const movimentacoes = selectedEquipments.map(selected => ({
-        tipo: 'Retirada',
-        colaborador_id: selectedEmployee,
-        equipamento_id: selected.id,
-        grupo_retirada: grupoRetirada,
-        quantidade: selected.quantity,
-        data_prevista_devolucao: returnDate,
-      }));
-  
-      const { error: movError } = await supabase
-        .from('movimentacoes')
-        .insert(movimentacoes);
-  
-      if (movError) throw movError;
-  
-      // Atualizar estoque dos equipamentos
-      for (const selected of selectedEquipments) {
-        const { error: updateError } = await supabase
-          .from('equipamentos')
-          .update({ 
-            quantidade: equipments.find(eq => eq.id === selected.id)!.quantidade - selected.quantity 
-          })
-          .eq('id', selected.id);
-  
-        if (updateError) throw updateError;
-      }
-  
-      // Gerar termo de retirada
-      const colaborador = colaboradores.find(c => c.id === selectedEmployee);
-      const equipamentosDetalhes = getSelectedEquipmentDetails();
-      
-      const dataDocumento = {
+{{ ... }}
         nomeColaborador: colaborador?.nome || '',
         cargoColaborador: colaborador?.cargo || '',
         dataRetirada: new Date().toLocaleDateString('pt-BR'),
@@ -169,166 +107,18 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
         totalItens: equipamentosDetalhes.reduce((acc, curr) => acc + (curr.selectedQuantity || 0), 0)
       };
   
-      // Gerar o documento
-      await generateTermoRetirada(dataDocumento);
-  
-      toast({
-        title: "Sucesso",
-        description: "Retirada registrada e documento gerado com sucesso!",
-      });
-  
-      // Reset form
-      setSelectedEmployee("");
-      setReturnDate("");
-      setSelectedEquipments([]);
-      
-      // Recarregar equipamentos
-      await loadData();
-    } catch (error) {
-      console.error('Erro ao registrar retirada:', error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível registrar a retirada.",
-        variant: "destructive",
+{{ ... }}
       });
     }
   };
 
-  const handleEntregaEPI = async () => {
-    console.log('Iniciando geração de termo de entrega de EPI...');
-    
-    if (!selectedEmployee || selectedEquipments.length === 0) {
-      const errorMsg = !selectedEmployee ? 'Nenhum colaborador selecionado' : 'Nenhum equipamento selecionado';
-      console.error('Erro de validação:', errorMsg);
-      
-      toast({
-        title: 'Erro',
-        description: 'Selecione um colaborador e pelo menos um equipamento EPI.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      console.log('Colaborador selecionado ID:', selectedEmployee);
-      const colaborador = colaboradores.find(c => c.id === selectedEmployee);
-      console.log('Dados do colaborador:', colaborador);
-      
-      const equipamentosDetalhes = getSelectedEquipmentDetails();
-      console.log('Equipamentos selecionados:', equipamentosDetalhes);
-      
-      // Filtrar apenas itens EPI
-      const itensEPI = equipamentosDetalhes.filter(item => item.epi);
-      console.log('Itens EPI filtrados:', itensEPI);
-      
-      if (itensEPI.length === 0) {
-        console.warn('Nenhum item EPI encontrado nos equipamentos selecionados');
-        toast({
-          title: 'Aviso',
-          description: 'Nenhum item EPI selecionado.',
-          variant: 'default',
-        });
-        return;
-      }
-
-      const dataDocumento = {
-        nomeColaborador: colaborador?.nome || '',
-        cargoColaborador: colaborador?.cargo || '',
-        dataEntrega: new Date().toLocaleDateString('pt-BR'),
-        itens: itensEPI.map(item => ({
-          descricao: item.descricao || '',
-          quantidade: item.selectedQuantity || 0,
-          numeroSerie: item.numero_serie || 'N/A',
-          ca: item.ca || 'N/A'
-        })),
-        totalItens: itensEPI.reduce((acc, curr) => acc + (curr.selectedQuantity || 0), 0)
-      };
-
-      console.log('Dados para geração do documento:', dataDocumento);
-      
-      try {
-        console.log('Chamando generateTermoEntregaEPI...');
-        await generateTermoEntregaEPI(dataDocumento);
-        console.log('Documento gerado com sucesso');
-        
-        toast({
-          title: "Sucesso",
-          description: "Termo de Entrega de EPI gerado com sucesso!",
-        });
-      } catch (docError) {
-        console.error('Erro na geração do documento:', docError);
-        throw docError; // Re-lança o erro para ser capturado pelo catch externo
-      }
-      
-    } catch (error) {
-      console.error('Erro ao gerar termo de entrega de EPI:', error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível gerar o termo de entrega de EPI.",
-        variant: "destructive",
-      });
-    }
-  };
-  
-  const handleRegistrarDevolucao = async () => {
-    if (!selectedEmployee || selectedEquipments.length === 0) {
-      toast({
-        title: 'Erro',
-        description: 'Selecione um colaborador e pelo menos um equipamento para devolução.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      const colaborador = colaboradores.find(c => c.id === selectedEmployee);
-      const equipamentosDetalhes = getSelectedEquipmentDetails();
-      
-      const dataDocumento = {
-        nomeColaborador: colaborador?.nome || '',
-        cargoColaborador: colaborador?.cargo || '',
-        dataDevolucao: new Date().toLocaleDateString('pt-BR'),
-        itens: equipamentosDetalhes.map(item => ({
-          descricao: item.descricao || '',
-          quantidade: item.selectedQuantity || 0,
-          numeroSerie: item.numero_serie || 'N/A',
-          estado: 'Em bom estado' // Você pode adicionar um seletor de estado se necessário
-        })),
-        totalItens: equipamentosDetalhes.reduce((acc, curr) => acc + (curr.selectedQuantity || 0), 0)
-      };
-
-      await generateTermoDevolucao(dataDocumento);
-      
-      toast({
-        title: "Sucesso",
-        description: "Termo de Devolução gerado com sucesso!",
-      });
-      
-    } catch (error) {
-      console.error('Erro ao gerar termo de devolução:', error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível gerar o termo de devolução.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const getSelectedEquipmentDetails = () => {
-    return selectedEquipments.map(selected => {
-      const equipment = equipments.find(eq => eq.id === selected.id);
-      return {
-        ...equipment,
-        selectedQuantity: selected.quantity
-      };
+  const handleEntregaEPI = () => {
+    console.log("Entrega EPI:", { selectedEmployee, returnDate, selectedEquipments });
+    toast({
+      title: "Info",
+      description: "Geração de PDF EPI será implementada em breve.",
     });
-  };
-
-  const removeEquipment = (equipmentId: string) => {
-    setSelectedEquipments(prev => 
-      prev.filter(item => item.id !== equipmentId)
-    );
-  };
+{{ ... }}
 
   return (
     <div className="min-h-screen bg-background">

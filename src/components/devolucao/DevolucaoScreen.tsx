@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,6 +8,7 @@ import { FileText, Package } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { generateTermoDevolucao } from "@/services/documentService";
 
 interface Movimentacao {
   id: string;
@@ -46,18 +47,14 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadMovimentacoes();
-  }, []);
-
-  const loadMovimentacoes = async () => {
+  const loadMovimentacoes = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('movimentacoes')
         .select(`
           *,
           colaboradores:colaborador_id(nome),
-          equipamentos:equipamento_id(tipo, descricao)
+          equipamentos:equipamento_id(tipo, descricao, numero_serie)
         `)
         .eq('tipo', 'Retirada')
         .order('data_movimentacao', { ascending: false });
@@ -72,7 +69,11 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
         variant: "destructive",
       });
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadMovimentacoes();
+  }, [loadMovimentacoes]);
 
   const handleSelectRetirada = async (retiradaId: string) => {
     setSelectedRetirada(retiradaId);
@@ -117,62 +118,101 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
 
   const updateEquipamento = (equipamentoId: string, field: keyof EquipmentoDevolucao, value: string) => {
     setEquipamentosDevolucao(prev =>
-      prev.map(eq =>
-        eq.equipamento_id === equipamentoId ? { ...eq, [field]: value } : eq
+      prev.map(equip =>
+        equip.equipamento_id === equipamentoId ? { ...equip, [field]: value } : equip
       )
     );
   };
 
   const handleRegistrarDevolucao = async () => {
+    console.log('Iniciando registro de devolução...');
+    console.log('Retirada selecionada:', selectedRetirada);
+    console.log('Equipamentos para devolução:', equipamentosDevolucao);
+    
     if (!selectedRetirada || equipamentosDevolucao.length === 0) {
+      const errorMsg = !selectedRetirada ? 'Nenhuma retirada selecionada' : 'Nenhum equipamento para devolução';
+      console.error('Erro de validação:', errorMsg);
+      
       toast({
         title: "Erro",
-        description: "Selecione uma retirada e configure os equipamentos.",
+        description: errorMsg,
         variant: "destructive",
       });
       return;
     }
 
     try {
+      // Encontrar a movimentação de retirada selecionada
+      const movimentacaoRetirada = movimentacoes.find(m => m.id === selectedRetirada);
+      
+      if (!movimentacaoRetirada) {
+        throw new Error('Movimentação de retirada não encontrada');
+      }
+      
+      console.log('Movimentação de retirada encontrada:', movimentacaoRetirada);
+      
       // Criar movimentações de devolução
       const devolucoes = equipamentosDevolucao.map(eq => ({
         tipo: 'Devolucao',
-        colaborador_id: movimentacoes.find(m => m.id === selectedRetirada)?.colaborador_id,
+        colaborador_id: movimentacaoRetirada.colaborador_id,
         equipamento_id: eq.equipamento_id,
-        grupo_retirada: movimentacoes.find(m => m.id === selectedRetirada)?.grupo_retirada,
+        grupo_retirada: movimentacaoRetirada.grupo_retirada,
         quantidade: eq.quantidade,
         estado_conservacao: eq.estado_conservacao,
         avarias: eq.avarias,
+        data_movimentacao: new Date().toISOString()
       }));
 
-      const { error: devolucaoError } = await supabase
+      console.log('Registrando devolução no banco de dados...');
+      const { data, error: devolucaoError } = await supabase
         .from('movimentacoes')
-        .insert(devolucoes);
+        .insert(devolucoes)
+        .select();
 
-      if (devolucaoError) throw devolucaoError;
+      if (devolucaoError) {
+        console.error('Erro ao registrar devolução:', devolucaoError);
+        throw devolucaoError;
+      }
+      
+      console.log('Devolução registrada com sucesso:', data);
 
       // Atualizar estoque dos equipamentos
+      console.log('Atualizando estoque dos equipamentos...');
       for (const eq of equipamentosDevolucao) {
+        console.log(`Atualizando equipamento ID: ${eq.equipamento_id}`);
+        
         // Buscar quantidade atual do equipamento
+        console.log('Buscando quantidade atual do equipamento...');
         const { data: equipData, error: equipError } = await supabase
           .from('equipamentos')
-          .select('quantidade')
+          .select('quantidade, estado_conservacao, avarias')
           .eq('id', eq.equipamento_id)
           .single();
 
-        if (equipError) throw equipError;
-
+        if (equipError) {
+          console.error('Erro ao buscar equipamento:', equipError);
+          throw equipError;
+        }
+        
+        console.log('Dados atuais do equipamento:', equipData);
+        
         // Atualizar quantidade
+        console.log('Atualizando quantidade e estado do equipamento...');
         const { error: updateError } = await supabase
           .from('equipamentos')
           .update({ 
-            quantidade: equipData.quantidade + eq.quantidade,
-            estado_conservacao: eq.estado_conservacao,
-            avarias: eq.avarias
+            quantidade: (equipData.quantidade || 0) + eq.quantidade,
+            estado_conservacao: eq.estado_conservacao || equipData.estado_conservacao,
+            avarias: eq.avarias || equipData.avarias
           })
           .eq('id', eq.equipamento_id);
 
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error('Erro ao atualizar equipamento:', updateError);
+          throw updateError;
+        }
+        
+        console.log('Equipamento atualizado com sucesso');
       }
 
       toast({
@@ -182,6 +222,25 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
 
       // Reset form
       handleCancelar();
+      
+      // Gerar o documento de devolução
+      const movimentacaoRetirada = movimentacoes.find(m => m.id === selectedRetirada);
+      if (movimentacaoRetirada) {
+        const documentData = {
+          nomeColaborador: movimentacaoRetirada.colaboradores?.nome || 'Nome não disponível',
+          dataDevolucao: new Date().toLocaleDateString('pt-BR'),
+          itens: equipamentosDevolucao.map(eq => ({
+            descricao: eq.descricao,
+            quantidade: eq.quantidade,
+            numeroSerie: eq.numero_serie,
+            estado: eq.estado_conservacao
+          })),
+          totalItens: equipamentosDevolucao.reduce((acc, curr) => acc + curr.quantidade, 0)
+        };
+        
+        console.log('Gerando termo de devolução com dados:', documentData);
+        await generateTermoDevolucao(documentData);
+      }
       
       // Recarregar movimentações
       await loadMovimentacoes();
