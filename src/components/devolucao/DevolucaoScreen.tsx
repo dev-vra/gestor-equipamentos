@@ -223,8 +223,7 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
       // Reset form
       handleCancelar();
       
-      // Gerar o documento de devolução
-      const movimentacaoRetirada = movimentacoes.find(m => m.id === selectedRetirada);
+      // Reutilizando a variável movimentacaoRetirada que já foi definida anteriormente
       if (movimentacaoRetirada) {
         const documentData = {
           nomeColaborador: movimentacaoRetirada.colaboradores?.nome || 'Nome não disponível',
