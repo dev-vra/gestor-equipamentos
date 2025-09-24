@@ -6,6 +6,7 @@ import {
   generateTermoEntregaEPI 
 } from '@/services/documentService';
 
+
 interface DocumentGeneratorProps {
   type: 'retirada' | 'devolucao' | 'entrega-epi';
   data: {

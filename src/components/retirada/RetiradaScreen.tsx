@@ -18,12 +18,17 @@ interface Equipment {
   numero_serie: string;
   quantidade: number;
   epi: boolean;
+  estado_conservacao?: string;
+  avarias?: string;
 }
 
 interface Colaborador {
   id: string;
   nome: string;
   cargo: string;
+  razao_social?: string;
+  cnpj?: string;
+  cpf?: string;
 }
 
 interface RetiradaScreenProps {
@@ -53,10 +58,10 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
       setEquipments(equipData || []);
       setFilteredEquipments(equipData || []);
 
-      // Carregar colaboradores
+      // Carregar colaboradores com campos adicionais
       const { data: colabData, error: colabError } = await supabase
         .from('colaboradores')
-        .select('*');
+        .select('id, nome, cargo, razao_social, cnpj, cpf');
 
       if (colabError) throw colabError;
       setColaboradores(colabData || []);
@@ -156,17 +161,57 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
       const colaborador = colaboradores.find(c => c.id === selectedEmployee);
       const equipamentosDetalhes = getSelectedEquipmentDetails();
       
+      // Obter a lista completa de equipamentos para referência
+      const { data: equipamentosData, error: equipError } = await supabase
+        .from('equipamentos')
+        .select('*');
+      
+      if (equipError) throw equipError;
+      
+      // Converter para o tipo Equipment[] para garantir a tipagem correta
+      const equipamentos = equipamentosData as Equipment[];
+      
+      // Prepara os itens para o template
+      const itens = equipamentosDetalhes.map(eq => {
+        const equipamento = equipamentos.find(e => e.id === eq.id) || eq;
+        const quantidade = 'selectedQuantity' in eq ? eq.selectedQuantity : 1;
+        
+        return {
+          id: equipamento.id || '',
+          desc: equipamento.descricao || '',
+          serie: equipamento.numero_serie || 'N/A',
+          avaria: 'avarias' in equipamento ? equipamento.avarias : 'Nenhuma',
+          estado: 'estado_conservacao' in equipamento ? equipamento.estado_conservacao : 'Bom',
+          qtd: quantidade,
+          
+          // Mantendo os campos antigos para compatibilidade
+          descricao: equipamento.descricao || '',
+          quantidade: quantidade,
+          numeroSerie: equipamento.numero_serie || 'N/A',
+          estado: 'estado_conservacao' in equipamento ? equipamento.estado_conservacao : 'Bom',
+          avarias: 'avarias' in equipamento ? equipamento.avarias : 'Nenhuma'
+        };
+      });
+
       const dataDocumento = {
+        // Dados da empresa (vindos do cadastro do colaborador)
+        razao_funcionario: colaborador?.razao_social || '',
+        cnpj_funcionario: colaborador?.cnpj || '',
+        
+        // Dados do colaborador
         nomeColaborador: colaborador?.nome || '',
+        cpf_funcionario: colaborador?.cpf || '',
         cargoColaborador: colaborador?.cargo || '',
+        
+        // Datas
         dataRetirada: new Date().toLocaleDateString('pt-BR'),
         dataDevolucao: new Date(returnDate).toLocaleDateString('pt-BR'),
-        itens: equipamentosDetalhes.map(eq => ({
-          descricao: eq.descricao || '',
-          quantidade: eq.selectedQuantity || 0,
-          numeroSerie: eq.numero_serie || 'N/A'
-        })),
-        totalItens: equipamentosDetalhes.reduce((acc, curr) => acc + (curr.selectedQuantity || 0), 0)
+        
+        // Itens para o loop no template
+        itens: itens,
+        
+        // Total de itens
+        totalItens: itens.reduce((acc, item) => acc + item.qtd, 0)
       };
   
       // Gerar o documento
@@ -231,17 +276,29 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
         return;
       }
 
+      // Prepara os itens para o template
+      const itens = itensEPI.map(item => ({
+        descricao: item.descricao || '',
+        quantidade: item.selectedQuantity || 1,
+        numeroSerie: item.numero_serie || 'N/A',
+        estado: item.estado_conservacao || 'Bom',
+        avarias: item.avarias || 'Nenhuma',
+        ca: 'N/A' // Adicionando campo CA para compatibilidade
+      }));
+
       const dataDocumento = {
+        // Dados do colaborador
         nomeColaborador: colaborador?.nome || '',
         cargoColaborador: colaborador?.cargo || '',
+        
+        // Datas
         dataEntrega: new Date().toLocaleDateString('pt-BR'),
-        itens: itensEPI.map(item => ({
-          descricao: item.descricao || '',
-          quantidade: item.selectedQuantity || 0,
-          numeroSerie: item.numero_serie || 'N/A',
-          ca: item.ca || 'N/A'
-        })),
-        totalItens: itensEPI.reduce((acc, curr) => acc + (curr.selectedQuantity || 0), 0)
+        
+        // Itens para o loop no template
+        itens: itens,
+        
+        // Total de itens
+        totalItens: itens.reduce((acc, item) => acc + item.quantidade, 0)
       };
 
       console.log('Dados para geração do documento:', dataDocumento);
@@ -407,8 +464,11 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
                 
                 <div className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium mb-2 block">Colaborador</label>
-                    <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
+                    <label className="text-sm font-medium mb-2 block">Colaborador *</label>
+                    <Select 
+                      value={selectedEmployee} 
+                      onValueChange={setSelectedEmployee}
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Selecione o colaborador" />
                       </SelectTrigger>
@@ -423,13 +483,26 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium mb-2 block">Data Prevista de Devolução</label>
+                    <label className="text-sm font-medium mb-2 block">Data Prevista de Devolução *</label>
                     <Input
                       type="date"
                       value={returnDate}
                       onChange={(e) => setReturnDate(e.target.value)}
+                      min={new Date().toISOString().split('T')[0]}
                     />
                   </div>
+                  
+                  {selectedEmployee && (
+                    <div className="p-4 bg-muted/50 rounded-lg space-y-2">
+                      <p className="text-sm font-medium">Dados do Colaborador:</p>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>Razão Social: <span className="font-medium">{colaboradores.find(c => c.id === selectedEmployee)?.razao_social || 'Não informado'}</span></div>
+                        <div>CNPJ: <span className="font-medium">{colaboradores.find(c => c.id === selectedEmployee)?.cnpj || 'Não informado'}</span></div>
+                        <div>CPF: <span className="font-medium">{colaboradores.find(c => c.id === selectedEmployee)?.cpf || 'Não informado'}</span></div>
+                        <div>Cargo: <span className="font-medium">{colaboradores.find(c => c.id === selectedEmployee)?.cargo || 'Não informado'}</span></div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </Card>

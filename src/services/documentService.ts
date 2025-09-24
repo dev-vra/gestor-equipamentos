@@ -2,19 +2,31 @@ import { saveAs } from 'file-saver';
 
 interface DocumentData {
   [key: string]: unknown;
+  
+  // Dados do colaborador
+  nomeColaborador?: string;
+  cargoColaborador?: string;
+  
+  // Datas
+  dataRetirada?: string;
+  dataDevolucao?: string;
+  dataEntrega?: string;
+  
+  // Itens
   itens?: Array<{
     descricao: string;
     quantidade: number;
     numeroSerie: string;
-    ca?: string;
     estado?: string;
+    avarias?: string;
+    ca?: string;
   }>;
+  
+  // Total
   totalItens?: number;
-  nomeColaborador?: string;
-  cargoColaborador?: string;
-  dataRetirada?: string;
-  dataDevolucao?: string;
-  dataEntrega?: string;
+  
+  // Tipo de documento
+  tipoDocumento?: string;
 }
 
 // URL base da API - aponta para o servidor Express na porta 3001
