@@ -20,6 +20,12 @@ interface DocumentData {
     estado?: string;
     avarias?: string;
     ca?: string;
+    validade_ca?: string;
+    epi_descricao?: string;
+    epi_ca?: string;
+    epi_validade?: string;
+    epi_qtd?: number;
+    tipo?: string;
   }>;
   
   // Total

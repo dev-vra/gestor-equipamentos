@@ -21,7 +21,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
               Sistema de Controle de Equipamentos
             </h1>
             <p className="text-muted-foreground">
-              Gerencie retiradas, devoluções e cadastros de forma eficiente
+              Gerenciamento de retiradas, devoluções e cadastros de Equipamentos de Engenharia
             </p>
           </div>
 
@@ -39,7 +39,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                   Registrar Retirada
                 </h3>
                 <p className="text-muted-foreground mb-6">
-                  Registre a retirada de equipamentos pelos colaboradores
+                  Registre a retirada de equipamentos
                 </p>
                 <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground">
                   Acessar
@@ -59,7 +59,7 @@ export function HomeScreen({ onNavigate }: HomeScreenProps) {
                   Registrar Devolução
                 </h3>
                 <p className="text-muted-foreground mb-6">
-                  Processe devoluções e avalie o estado dos equipamentos
+                  Processe a devoluções dos equipamentos
                 </p>
                 <Button variant="outline" className="w-full group-hover:bg-primary group-hover:text-primary-foreground">
                   Acessar

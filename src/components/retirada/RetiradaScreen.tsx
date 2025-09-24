@@ -51,10 +51,60 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
 
   const loadData = useCallback(async () => {
     try {
-      const { data: equipData, error: equipError } = await supabase.from('equipamentos').select('*');
-      if (equipError) throw equipError;
-      setEquipments(equipData || []);
-      setFilteredEquipments(equipData || []);
+      console.log('Iniciando carregamento de dados de equipamentos...');
+      
+      // Verificar se o Supabase está configurado corretamente
+      if (!supabase) {
+        console.error('Erro: Supabase não está configurado corretamente');
+        throw new Error('Erro na configuração do banco de dados');
+      }
+      
+      // Consulta para obter os equipamentos
+      console.log('Executando consulta no banco de dados...');
+      
+      // Buscar os dados dos equipamentos incluindo as colunas canum e validade
+      const { data: equipData, error: equipError } = await supabase
+        .from('equipamentos')
+        .select('id, tipo, descricao, numero_serie, quantidade, epi, estado_conservacao, avarias, canum, validade')
+        .order('tipo', { ascending: true });
+      
+      if (equipError) {
+        console.error('Erro ao buscar equipamentos:', equipError);
+        throw equipError;
+      }
+      
+      // Mapear os campos para os nomes esperados pelo restante do código
+      const equipamentosComCA = equipData.map(equip => ({
+        ...equip,
+        // Mapear canum para ca e manter o valor original
+        ca: equip.canum || 'Não informado',
+        // Mapear validade para validade_ca e formatar a data se existir
+        validade_ca: equip.validade ? new Date(equip.validade).toLocaleDateString('pt-BR') : 'Não informada'
+      }));
+      
+      console.log('Estrutura dos dados de equipamentos:', equipamentosComCA.length > 0 ? Object.keys(equipamentosComCA[0]) : 'Nenhum equipamento encontrado');
+      
+      // Verificar se há dados retornados
+      if (!equipData || equipData.length === 0) {
+        console.warn('Nenhum equipamento encontrado na tabela "equipamentos"');
+      } else {
+        console.log(`Dados dos equipamentos carregados (${equipData.length} itens):`, equipData);
+        // Verificar se os campos ca e validade_ca estão presentes nos dados
+        equipData.forEach((equip, index) => {
+          console.log(`Equipamento ${index + 1}:`, {
+            tipo: equip.tipo,
+            descricao: equip.descricao,
+            temCA: 'ca' in equip,
+            ca: equip.ca,
+            temValidadeCA: 'validade_ca' in equip,
+            validade_ca: equip.validade_ca
+          });
+        });
+      }
+      
+      // Atualizar o estado com os dados carregados
+      setEquipments(equipamentosComCA || []);
+      setFilteredEquipments(equipamentosComCA || []);
 
       const { data: colabData, error: colabError } = await supabase.from('colaboradores').select('id, nome, cargo, razao_social, cnpj, cpf');
       if (colabError) throw colabError;
@@ -183,13 +233,22 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
         return;
       }
       
-      // As chaves aqui agora correspondem ao template termo_entrega_epi_template.docx
+      // Formatando os itens para o template
       const itens = itensEPI.map(item => ({
+        // Campos usados no template
         epi_descricao: item.descricao || '',
-        epi_ca: item.ca || 'N/A',
-        epi_validade: item.validade_ca || 'N/A', // Supondo que você tenha este campo
+        epi_ca: item.ca || 'Não informado',
+        epi_validade: item.validade_ca ? new Date(item.validade_ca).toLocaleDateString('pt-BR') : 'Não informada',
         epi_qtd: item.selectedQuantity || 0,
+        
+        // Garantindo que os campos estejam no nível raiz do item para compatibilidade
+        ca: item.ca || 'Não informado',
+        validade_ca: item.validade_ca ? new Date(item.validade_ca).toLocaleDateString('pt-BR') : 'Não informada',
+        quantidade: item.selectedQuantity || 0,
+        tipo: item.tipo || ''
       }));
+      
+      console.log('Itens formatados para o documento:', JSON.stringify(itens, null, 2));
 
       const dataDocumento = {
         razao_funcionario: colaborador?.razao_social || '',
@@ -198,16 +257,31 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
         cpf_funcionario: colaborador?.cpf || '',
         funcao_funcionario: colaborador?.cargo || '',
         data_entrega: new Date().toLocaleDateString('pt-BR'),
+        data_emissao: new Date().toLocaleDateString('pt-BR'),
         itens: itens,
+        total_itens: itens.reduce((total, item) => total + (item.epi_qtd || 0), 0)
       };
 
+      console.log('Dados enviados para o documento:', JSON.stringify(dataDocumento, null, 2));
+      
       await generateTermoEntregaEPI(dataDocumento);
       
-      toast({ title: "Sucesso", description: "Termo de Entrega de EPI gerado com sucesso!" });
+      toast({ 
+        title: "Sucesso", 
+        description: "Termo de Entrega de EPI gerado com sucesso!" 
+      });
+      
+      // Limpar seleção após gerar o documento
+      setSelectedEmployee("");
+      setSelectedEquipments([]);
       
     } catch (error) {
       console.error('Erro ao gerar termo de entrega de EPI:', error);
-      toast({ title: "Erro", description: "Não foi possível gerar o termo de entrega de EPI.", variant: "destructive" });
+      toast({ 
+        title: "Erro", 
+        description: "Não foi possível gerar o termo de entrega de EPI.", 
+        variant: "destructive" 
+      });
     }
   };
 

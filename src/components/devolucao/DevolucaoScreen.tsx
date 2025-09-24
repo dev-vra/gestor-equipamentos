@@ -11,6 +11,16 @@ import { useToast } from "@/hooks/use-toast";
 import { generateTermoDevolucao } from "@/services/documentService";
 
 // Interfaces (sem alterações)
+interface Equipamento {
+  id: string;
+  tipo: string;
+  descricao: string;
+  numero_serie: string;
+  quantidade: number;
+  estado_conservacao?: string;
+  avarias?: string;
+}
+
 interface Movimentacao {
   id: string;
   data_movimentacao: string;
@@ -25,11 +35,8 @@ interface Movimentacao {
     cnpj: string;
     cpf: string;
   };
-  equipamentos?: {
-    tipo: string;
-    descricao: string;
-    numero_serie: string;
-  };
+  equipamentos?: Equipamento;
+  equipamento?: Equipamento; // Adicionando para compatibilidade
 }
 
 interface EquipmentoDevolucao {
@@ -41,6 +48,10 @@ interface EquipmentoDevolucao {
   estado_conservacao: string;
   avarias: string;
   quantidade: number;
+  grupo_retirada: string;
+  data_retirada: string;
+  colaborador_nome: string;
+  colaborador_cargo: string;
 }
 
 interface DevolucaoScreenProps {
@@ -79,23 +90,34 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
 
   useEffect(() => { loadMovimentacoes(); }, [loadMovimentacoes]);
 
-  const handleSelectRetirada = (retiradaId: string) => {
-    setSelectedRetiradaId(retiradaId);
-    const retiradaSelecionada = movimentacoes.find(m => m.id === retiradaId);
-    if (retiradaSelecionada && retiradaSelecionada.equipamentos) {
-      const equipamento: EquipmentoDevolucao = {
-        movimentacao_id: retiradaSelecionada.id,
-        equipamento_id: retiradaSelecionada.equipamento_id,
-        tipo: retiradaSelecionada.equipamentos.tipo || '',
-        descricao: retiradaSelecionada.equipamentos.descricao || '',
-        numero_serie: retiradaSelecionada.equipamentos.numero_serie || '',
-        estado_conservacao: 'Bom',
-        avarias: '',
-        quantidade: retiradaSelecionada.quantidade,
-      };
-      setEquipamentosDevolucao([equipamento]);
+  const handleSelectRetirada = (grupoRetirada: string) => {
+    setSelectedRetiradaId(grupoRetirada);
+    
+    // Filtrar todas as movimentações do mesmo grupo
+    const movimentacoesDoGrupo = movimentacoes.filter(m => m.grupo_retirada === grupoRetirada);
+    
+    if (movimentacoesDoGrupo.length > 0) {
+      const primeiroItem = movimentacoesDoGrupo[0];
+      const colaborador = primeiroItem.colaboradores;
+      
+      const equipamentos: EquipmentoDevolucao[] = movimentacoesDoGrupo.map(mov => ({
+        movimentacao_id: mov.id,
+        equipamento_id: mov.equipamento_id,
+        tipo: mov.equipamentos?.tipo || '',
+        descricao: mov.equipamentos?.descricao || '',
+        numero_serie: mov.equipamentos?.numero_serie || '',
+        estado_conservacao: mov.equipamentos?.estado_conservacao || 'Bom',
+        avarias: mov.equipamentos?.avarias || '',
+        quantidade: mov.quantidade,
+        grupo_retirada: mov.grupo_retirada,
+        data_retirada: mov.data_movimentacao,
+        colaborador_nome: colaborador?.nome || '',
+        colaborador_cargo: colaborador?.cargo || ''
+      }));
+      
+      setEquipamentosDevolucao(equipamentos);
     } else {
-        setEquipamentosDevolucao([]);
+      setEquipamentosDevolucao([]);
     }
   };
   
@@ -117,17 +139,65 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
     }
 
     try {
-      const movimentacaoRetirada = movimentacoes.find(m => m.id === selectedRetiradaId);
-      if (!movimentacaoRetirada || !movimentacaoRetirada.colaboradores) {
-        throw new Error('Dados da retirada original ou do colaborador não encontrados.');
-      }
+      const movimentacoesDoGrupo = movimentacoes.filter(m => m.grupo_retirada === selectedRetiradaId);
       
-      // Lógica de BD (mantida como referência)
-      // ... a sua lógica para inserir 'Devolucao' e atualizar o stock vai aqui
+      if (movimentacoesDoGrupo.length === 0) {
+        throw new Error('Nenhuma movimentação encontrada para este grupo de retirada.');
+      }
 
+      const primeiroItem = movimentacoesDoGrupo[0];
+      const colaborador = primeiroItem.colaboradores;
+      
+      if (!colaborador) {
+        throw new Error('Dados do colaborador não encontrados.');
+      }
+
+      // Criar movimentações de devolução para cada item
+      const devolucoes = equipamentosDevolucao.map(equip => ({
+        tipo: 'Devolucao',
+        colaborador_id: primeiroItem.colaborador_id,
+        equipamento_id: equip.equipamento_id,
+        grupo_retirada: selectedRetiradaId,
+        quantidade: equip.quantidade,
+        estado_conservacao: equip.estado_conservacao,
+        avarias: equip.avarias,
+        data_movimentacao: new Date().toISOString()
+      }));
+
+      // Inserir as devoluções
+      const { error: devolucaoError } = await supabase
+        .from('movimentacoes')
+        .insert(devolucoes);
+
+      if (devolucaoError) throw devolucaoError;
+
+      // Atualizar o estoque e estado dos equipamentos
+      for (const equip of equipamentosDevolucao) {
+        // Buscar quantidade atual
+        const { data: equipamentoAtual, error: fetchError } = await supabase
+          .from('equipamentos')
+          .select('quantidade')
+          .eq('id', equip.equipamento_id)
+          .single();
+
+        if (fetchError) throw fetchError;
+
+        // Atualizar quantidade e estado
+        const { error: updateError } = await supabase
+          .from('equipamentos')
+          .update({
+            quantidade: (equipamentoAtual?.quantidade || 0) + equip.quantidade,
+            estado_conservacao: equip.estado_conservacao,
+            avarias: equip.avarias
+          })
+          .eq('id', equip.equipamento_id);
+
+        if (updateError) throw updateError;
+      }
+
+      // Preparar dados para o documento
       const itens = equipamentosDevolucao.map(eq => ({
-        // Adicionada uma verificação (|| '') para segurança.
-        item_id: (eq.equipamento_id || '').slice(0, 8), 
+        item_id: eq.equipamento_id.slice(0, 8),
         item_desc: eq.descricao,
         item_serie: eq.numero_serie,
         novas_avarias: eq.avarias || 'Nenhuma',
@@ -136,20 +206,25 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
       }));
 
       const documentData = {
-        razao_funcionario: movimentacaoRetirada.colaboradores.razao_social || '',
-        cnpj_funcionario: movimentacaoRetirada.colaboradores.cnpj || '',
-        nome_funcionario: movimentacaoRetirada.colaboradores.nome || '',
-        cpf_funcionario: movimentacaoRetirada.colaboradores.cpf || '',
-        funcao_funcionario: movimentacaoRetirada.colaboradores.cargo || '',
-        id_retirada: (movimentacaoRetirada.id || '').slice(0, 8),
+        razao_funcionario: colaborador.razao_social || '',
+        cnpj_funcionario: colaborador.cnpj || '',
+        nome_funcionario: colaborador.nome || '',
+        cpf_funcionario: colaborador.cpf || '',
+        funcao_funcionario: colaborador.cargo || '',
+        id_retirada: selectedRetiradaId,
         data_devolucao_efetiva: new Date().toLocaleDateString('pt-BR'),
         itens: itens,
       };
         
+      // Gerar o documento de devolução
       await generateTermoDevolucao(documentData);
       
-      toast({ title: "Sucesso", description: "Devolução registada e documento gerado com sucesso!" });
+      toast({ 
+        title: "Sucesso", 
+        description: `Devolução do grupo ${selectedRetiradaId} registrada com sucesso!` 
+      });
 
+      // Limpar seleção e recarregar
       handleCancelar();
       await loadMovimentacoes();
     } catch (error) {
@@ -163,10 +238,17 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
     setEquipamentosDevolucao([]);
   };
 
-  // O JSX (return) permanece o mesmo
+  // Agrupar movimentações por grupo_retirada
+  const gruposUnicos = Array.from(
+    new Set(movimentacoes.map(m => m.grupo_retirada))
+  );
+
+  // Obter detalhes do grupo selecionado
+  const grupoSelecionado = movimentacoes.find(m => m.grupo_retirada === selectedRetiradaId);
+  
   return (
     <div className="min-h-screen bg-background">
-      <Header title="Registar Devolução" showBackButton onBack={onBack} />
+      <Header title="Registrar Devolução" showBackButton onBack={onBack} />
       
       <div className="container mx-auto p-6 space-y-6">
         <Card className="bg-card border-border">
@@ -179,38 +261,48 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>ID</TableHead>
-                    <TableHead>Data Retirada</TableHead>
-                    <TableHead>Funcionário</TableHead>
-                    <TableHead>Equipamento</TableHead>
-                    <TableHead>Grupo</TableHead>
-                    <TableHead>Qtd</TableHead>
+                    <TableHead>Grupo de Retirada</TableHead>
+                    <TableHead>Data</TableHead>
+                    <TableHead>Colaborador</TableHead>
+                    <TableHead>Equipamentos</TableHead>
                     <TableHead>Ação</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {movimentacoes.map((movimentacao) => (
-                    <TableRow 
-                      key={movimentacao.id}
-                      className={selectedRetiradaId === movimentacao.id ? "bg-primary/5 border-primary/20" : ""}
-                    >
-                      <TableCell className="font-medium">{movimentacao.id.slice(0, 8)}</TableCell>
-                      <TableCell>{new Date(movimentacao.data_movimentacao).toLocaleDateString('pt-BR')}</TableCell>
-                      <TableCell>{movimentacao.colaboradores?.nome}</TableCell>
-                      <TableCell>{movimentacao.equipamentos?.descricao}</TableCell>
-                      <TableCell>{movimentacao.grupo_retirada}</TableCell>
-                      <TableCell>{movimentacao.quantidade}</TableCell>
-                      <TableCell>
-                        <Button 
-                          size="sm"
-                          variant={selectedRetiradaId === movimentacao.id ? "default" : "outline"}
-                          onClick={() => handleSelectRetirada(movimentacao.id)}
-                        >
-                          {selectedRetiradaId === movimentacao.id ? "Selecionado" : "Selecionar"}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {gruposUnicos.map((grupo) => {
+                    const primeiraMov = movimentacoes.find(m => m.grupo_retirada === grupo);
+                    const totalItens = movimentacoes
+                      .filter(m => m.grupo_retirada === grupo)
+                      .reduce((acc, curr) => acc + curr.quantidade, 0);
+                    
+                    return (
+                      <TableRow 
+                        key={grupo}
+                        className={selectedRetiradaId === grupo ? "bg-primary/5 border-primary/20" : ""}
+                      >
+                        <TableCell className="font-medium">{grupo}</TableCell>
+                        <TableCell>
+                          {primeiraMov ? new Date(primeiraMov.data_movimentacao).toLocaleDateString('pt-BR') : ''}
+                        </TableCell>
+                        <TableCell>{primeiraMov?.colaboradores?.nome}</TableCell>
+                        <TableCell>
+                          {movimentacoes
+                            .filter(m => m.grupo_retirada === grupo)
+                            .map(m => `${m.quantidade}x ${m.equipamentos?.descricao}`)
+                            .join(', ')}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            variant={selectedRetiradaId === grupo ? "default" : "outline"}
+                            onClick={() => handleSelectRetirada(grupo)}
+                          >
+                            {selectedRetiradaId === grupo ? "Selecionado" : "Selecionar"}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
