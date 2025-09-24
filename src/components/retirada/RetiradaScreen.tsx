@@ -192,13 +192,43 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
         nomeColaborador: colaborador?.nome || '',
         cpf_funcionario: colaborador?.cpf || '',
         cargoColaborador: colaborador?.cargo || '',
-        dataRetirada: new Date().toLocaleDateString('pt-BR'),
-        dataDevolucao: new Date(returnDate + 'T00:00:00').toLocaleDateString('pt-BR'),
+        dataRetirada: new Date().toISOString(),
+        dataDevolucao: new Date(returnDate + 'T00:00:00').toISOString(),
         itens: itens,
         totalItens: itens.reduce((acc, item) => acc + item.quantidade, 0)
       };
+
+      // Atualizar o estoque no Supabase
+      const updates = equipamentosDetalhes.map(async (equip) => {
+        const { data, error } = await supabase
+          .from('equipamentos')
+          .update({ quantidade: equip.quantidade - (equip.selectedQuantity || 1) })
+          .eq('id', equip.id);
+        
+        if (error) throw error;
+        return data;
+      });
+
+      // Registrar a movimentação
+      const { error: movError } = await supabase
+        .from('movimentacoes')
+        .insert([{
+          tipo: 'saida',
+          colaborador_id: selectedEmployee,
+          data_retirada: new Date().toISOString(),
+          data_devolucao: new Date(returnDate + 'T00:00:00').toISOString(),
+          itens: itens,
+          status: 'pendente'
+        }]);
+
+      if (movError) throw movError;
  
-      await generateTermoRetirada(dataDocumento);
+      // Gerar o documento após as atualizações no banco de dados
+      await generateTermoRetirada({
+        ...dataDocumento,
+        dataRetirada: new Date().toLocaleDateString('pt-BR'),
+        dataDevolucao: new Date(returnDate + 'T00:00:00').toLocaleDateString('pt-BR')
+      });
  
       toast({ title: "Sucesso", description: "Retirada registada e documento gerado com sucesso!" });
       
@@ -209,7 +239,11 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
 
     } catch (error) {
       console.error('Erro ao registar retirada:', error);
-      toast({ title: "Erro", description: "Não foi possível registar a retirada.", variant: "destructive" });
+      toast({ 
+        title: "Erro", 
+        description: `Não foi possível registar a retirada: ${error.message}`, 
+        variant: "destructive" 
+      });
     }
   };
 
@@ -233,7 +267,7 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
         return;
       }
       
-      // Formatando os itens para o template
+      // Formatando os itens para o template e para o banco de dados
       const itens = itensEPI.map(item => ({
         // Campos usados no template
         epi_descricao: item.descricao || '',
@@ -242,6 +276,7 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
         epi_qtd: item.selectedQuantity || 0,
         
         // Garantindo que os campos estejam no nível raiz do item para compatibilidade
+        id: item.id,
         ca: item.ca || 'Não informado',
         validade_ca: item.validade_ca ? new Date(item.validade_ca).toLocaleDateString('pt-BR') : 'Não informada',
         quantidade: item.selectedQuantity || 0,
@@ -249,6 +284,36 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
       }));
       
       console.log('Itens formatados para o documento:', JSON.stringify(itens, null, 2));
+
+      // Atualizar o estoque no Supabase
+      const updates = itensEPI.map(async (equip) => {
+        const { data, error } = await supabase
+          .from('equipamentos')
+          .update({ quantidade: equip.quantidade - (equip.selectedQuantity || 1) })
+          .eq('id', equip.id);
+        
+        if (error) throw error;
+        return data;
+      });
+
+      // Registrar a entrega de EPI na tabela de movimentações
+      const { error: movError } = await supabase
+        .from('movimentacoes')
+        .insert([{
+          tipo: 'entrega_epi',
+          colaborador_id: selectedEmployee,
+          data_retirada: new Date().toISOString(),
+          itens: itens.map(item => ({
+            id: item.id,
+            descricao: item.epi_descricao,
+            quantidade: item.epi_qtd,
+            ca: item.epi_ca,
+            validade: item.epi_validade
+          })),
+          status: 'entregue'
+        }]);
+
+      if (movError) throw movError;
 
       const dataDocumento = {
         razao_funcionario: colaborador?.razao_social || '',
@@ -261,25 +326,27 @@ export function RetiradaScreen({ onBack }: RetiradaScreenProps) {
         itens: itens,
         total_itens: itens.reduce((total, item) => total + (item.epi_qtd || 0), 0)
       };
-
+      
       console.log('Dados enviados para o documento:', JSON.stringify(dataDocumento, null, 2));
       
+      // Gerar o documento após as atualizações no banco de dados
       await generateTermoEntregaEPI(dataDocumento);
       
       toast({ 
         title: "Sucesso", 
-        description: "Termo de Entrega de EPI gerado com sucesso!" 
+        description: "Entrega de EPI registrada e documento gerado com sucesso!" 
       });
       
       // Limpar seleção após gerar o documento
       setSelectedEmployee("");
       setSelectedEquipments([]);
+      await loadData(); // Recarregar os dados para atualizar a lista de equipamentos
       
     } catch (error) {
-      console.error('Erro ao gerar termo de entrega de EPI:', error);
+      console.error('Erro ao registrar entrega de EPI:', error);
       toast({ 
         title: "Erro", 
-        description: "Não foi possível gerar o termo de entrega de EPI.", 
+        description: `Não foi possível registrar a entrega de EPI: ${error.message}`, 
         variant: "destructive" 
       });
     }
