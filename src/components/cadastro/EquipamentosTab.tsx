@@ -147,7 +147,7 @@ export function EquipamentosTab() {
       toast({ title: "Erro", description: errorMessage, variant: "destructive" });
     }
   };
-
+    // programa finalizado comment
   const handleEdit = (equipamento: Equipamento) => {
     // Ao editar, formatar a data de 'yyyy-mm-ddT...' para 'yyyy-mm-dd'
     const formattedEquipamento = {
