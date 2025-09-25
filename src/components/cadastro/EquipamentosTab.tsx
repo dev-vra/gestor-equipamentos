@@ -47,7 +47,6 @@ export function EquipamentosTab() {
     validade: ""
   });
 
-  // Carregar equipamentos do Supabase ao montar o componente
   useEffect(() => {
     loadEquipamentos();
   }, []);
@@ -74,7 +73,7 @@ export function EquipamentosTab() {
   const filteredEquipamentos = equipamentos.filter(eq => 
     eq.tipo.toLowerCase().includes(searchTerm.toLowerCase()) ||
     eq.descricao.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    eq.numero_serie?.toLowerCase().includes(searchTerm.toLowerCase())
+    (eq.numero_serie || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const resetForm = () => {
@@ -93,62 +92,72 @@ export function EquipamentosTab() {
     setEditingEquipamento(null);
   };
 
+  // ==================================================================
+  // ✅ ALTERAÇÃO PRINCIPAL NA FUNÇÃO handleSubmit
+  // ==================================================================
   const handleSubmit = async () => {
     try {
+      // Validações básicas
+      if (!formData.tipo || !formData.descricao) {
+        toast({ title: "Erro", description: "Tipo e Descrição são campos obrigatórios.", variant: "destructive" });
+        return;
+      }
+
+      // Validação condicional para EPI
+      if (formData.epi) {
+        if (!formData.canum || !formData.validade) {
+          toast({ title: "Erro", description: "Para EPIs, o CA e a Validade são obrigatórios.", variant: "destructive" });
+          return;
+        }
+      }
+
+      const dataToSave = { ...formData };
+      // Limpar campos de EPI se a opção não estiver marcada
+      if (!dataToSave.epi) {
+          dataToSave.canum = undefined;
+          dataToSave.tamanho = undefined;
+          dataToSave.validade = undefined;
+      }
+
       if (editingEquipamento) {
         // Editar equipamento existente
         const { error } = await supabase
           .from('equipamentos')
-          .update(formData)
+          .update(dataToSave)
           .eq('id', editingEquipamento.id);
           
         if (error) throw error;
-        
-        toast({
-          title: "Sucesso",
-          description: "Equipamento atualizado com sucesso!",
-        });
+        toast({ title: "Sucesso", description: "Equipamento atualizado com sucesso!" });
+
       } else {
         // Adicionar novo equipamento
-        if (!formData.tipo || !formData.descricao) {
-          toast({
-            title: "Erro",
-            description: "Tipo e descrição são obrigatórios.",
-            variant: "destructive",
-          });
-          return;
-        }
-        
         const { error } = await supabase
           .from('equipamentos')
-          .insert([formData as any]);
+          .insert([dataToSave]);
           
         if (error) throw error;
-        
-        toast({
-          title: "Sucesso",
-          description: "Equipamento adicionado com sucesso!",
-        });
+        toast({ title: "Sucesso", description: "Equipamento adicionado com sucesso!" });
       }
       
-      // Recarregar a lista
       await loadEquipamentos();
-      
       setIsDialogOpen(false);
       resetForm();
+
     } catch (error) {
       console.error('Erro ao salvar equipamento:', error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível salvar o equipamento.",
-        variant: "destructive",
-      });
+      const errorMessage = error instanceof Error ? error.message : "Não foi possível salvar o equipamento.";
+      toast({ title: "Erro", description: errorMessage, variant: "destructive" });
     }
   };
 
   const handleEdit = (equipamento: Equipamento) => {
-    setEditingEquipamento(equipamento);
-    setFormData(equipamento);
+    // Ao editar, formatar a data de 'yyyy-mm-ddT...' para 'yyyy-mm-dd'
+    const formattedEquipamento = {
+        ...equipamento,
+        validade: equipamento.validade ? equipamento.validade.split('T')[0] : ''
+    };
+    setEditingEquipamento(formattedEquipamento);
+    setFormData(formattedEquipamento);
     setIsDialogOpen(true);
   };
 
@@ -160,21 +169,12 @@ export function EquipamentosTab() {
         .eq('id', id);
         
       if (error) throw error;
-      
-      toast({
-        title: "Sucesso",
-        description: "Equipamento excluído com sucesso!",
-      });
-      
-      // Recarregar a lista
+      toast({ title: "Sucesso", description: "Equipamento excluído com sucesso!" });
       await loadEquipamentos();
+
     } catch (error) {
       console.error('Erro ao excluir equipamento:', error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível excluir o equipamento.",
-        variant: "destructive",
-      });
+      toast({ title: "Erro", description: "Não foi possível excluir o equipamento.", variant: "destructive" });
     }
   };
 
@@ -183,6 +183,7 @@ export function EquipamentosTab() {
     setIsDialogOpen(true);
   };
 
+  // O JSX (return) permanece o mesmo
   return (
     <div className="space-y-6">
       {/* Controles */}
@@ -211,10 +212,10 @@ export function EquipamentosTab() {
               </DialogTitle>
             </DialogHeader>
             
-            <div className="grid gap-4">
+            <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="tipo">Tipo</Label>
+                  <Label htmlFor="tipo">Tipo *</Label>
                   <Input
                     id="tipo"
                     value={formData.tipo || ""}
@@ -232,7 +233,7 @@ export function EquipamentosTab() {
               </div>
 
               <div>
-                <Label htmlFor="descricao">Descrição</Label>
+                <Label htmlFor="descricao">Descrição *</Label>
                 <Input
                   id="descricao"
                   value={formData.descricao || ""}
@@ -264,7 +265,7 @@ export function EquipamentosTab() {
                     type="number"
                     min="1"
                     value={formData.quantidade || 1}
-                    onChange={(e) => setFormData(prev => ({ ...prev, quantidade: parseInt(e.target.value) }))}
+                    onChange={(e) => setFormData(prev => ({ ...prev, quantidade: parseInt(e.target.value, 10) || 1 }))}
                   />
                 </div>
               </div>
@@ -279,7 +280,7 @@ export function EquipamentosTab() {
                 />
               </div>
 
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 pt-2">
                 <Switch
                   id="epi"
                   checked={formData.epi || false}
@@ -289,9 +290,9 @@ export function EquipamentosTab() {
               </div>
 
               {formData.epi && (
-                <div className="grid grid-cols-3 gap-4 p-4 bg-muted rounded-lg">
+                <div className="grid grid-cols-3 gap-4 p-4 bg-muted/50 rounded-lg">
                   <div>
-                    <Label htmlFor="canum">CA (Certificado de Aprovação)</Label>
+                    <Label htmlFor="canum">CA (Certificado de Aprovação) *</Label>
                     <Input
                       id="canum"
                       value={formData.canum || ""}
@@ -307,7 +308,7 @@ export function EquipamentosTab() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="validade">Validade</Label>
+                    <Label htmlFor="validade">Validade *</Label>
                     <Input
                       id="validade"
                       type="date"
@@ -318,12 +319,12 @@ export function EquipamentosTab() {
                 </div>
               )}
 
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="outline" onClick={() => { setIsDialogOpen(false); resetForm(); }}>
                   Cancelar
                 </Button>
                 <Button onClick={handleSubmit}>
-                  {editingEquipamento ? "Salvar" : "Adicionar"}
+                  {editingEquipamento ? "Salvar Alterações" : "Adicionar Equipamento"}
                 </Button>
               </div>
             </div>
@@ -371,7 +372,7 @@ export function EquipamentosTab() {
                     <Badge variant="outline">Equipamento</Badge>
                   )}
                 </TableCell>
-                <TableCell>{new Date(equipamento.data_cadastro).toLocaleDateString('pt-BR')}</TableCell>
+                <TableCell>{new Date(equipamento.created_at).toLocaleDateString('pt-BR')}</TableCell>
                 <TableCell>
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" onClick={() => handleEdit(equipamento)}>
