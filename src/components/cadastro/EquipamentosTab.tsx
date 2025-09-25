@@ -20,7 +20,8 @@ interface Equipamento {
   estado_conservacao: string;
   avarias: string;
   quantidade: number;
-  data_cadastro: string;
+  created_at: string;
+  updated_at: string;
   epi: boolean;
   canum?: string;
   tamanho?: string;
@@ -92,9 +93,6 @@ export function EquipamentosTab() {
     setEditingEquipamento(null);
   };
 
-  // ==================================================================
-  // ✅ ALTERAÇÃO PRINCIPAL NA FUNÇÃO handleSubmit
-  // ==================================================================
   const handleSubmit = async () => {
     try {
       // Validações básicas
@@ -183,7 +181,6 @@ export function EquipamentosTab() {
     setIsDialogOpen(true);
   };
 
-  // O JSX (return) permanece o mesmo
   return (
     <div className="space-y-6">
       {/* Controles */}
@@ -343,7 +340,7 @@ export function EquipamentosTab() {
               <TableHead>Estado</TableHead>
               <TableHead>Quantidade</TableHead>
               <TableHead>EPI</TableHead>
-              <TableHead>Data Cadastro</TableHead>
+              <TableHead>Última Atualização</TableHead>
               <TableHead>Ações</TableHead>
             </TableRow>
           </TableHeader>
@@ -372,7 +369,18 @@ export function EquipamentosTab() {
                     <Badge variant="outline">Equipamento</Badge>
                   )}
                 </TableCell>
-                <TableCell>{new Date(equipamento.created_at).toLocaleDateString('pt-BR')}</TableCell>
+                <TableCell>
+                  {(() => {
+                    // A data de atualização pode ser igual à de criação se nunca foi editado
+                    const createdAt = new Date(equipamento.created_at);
+                    const updatedAt = new Date(equipamento.updated_at);
+
+                    // Compara as datas e usa a mais recente
+                    const dataMaisRecente = updatedAt > createdAt ? updatedAt : createdAt;
+                    
+                    return dataMaisRecente.toLocaleDateString('pt-BR');
+                  })()}
+                </TableCell>
                 <TableCell>
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" onClick={() => handleEdit(equipamento)}>
@@ -391,3 +399,4 @@ export function EquipamentosTab() {
     </div>
   );
 }
+
