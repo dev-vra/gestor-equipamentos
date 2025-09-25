@@ -1,23 +1,29 @@
 // Ficheiro: api/generate-document.js (Função Serverless da Vercel)
-const fs = require('fs');
-const path = require('path');
-const PizZip = require('pizzip');
-const Docxtemplater = require('docxtemplater');
+import fs from 'fs';
+import path from 'path';
+import PizZip from 'pizzip';
+import Docxtemplater from 'docxtemplater';
 
-module.exports = async (req, res) => {
+// O handler principal da função
+export default async function handler(req, res) {
+  // A Vercel gere o CORS, mas é boa prática adicionar estes cabeçalhos
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
+  // Tratar pedidos OPTIONS (necessário para o CORS)
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Apenas o método POST é permitido' });
   }
 
   try {
     const { templateName, data } = req.body;
+
+    // Caminho para os ficheiros na Vercel
     const templatePath = path.join(process.cwd(), 'public', 'templates', templateName);
     
     if (!fs.existsSync(templatePath)) {
@@ -36,7 +42,7 @@ module.exports = async (req, res) => {
     res.status(200).send(buffer);
 
   } catch (error) {
-    console.error(error);
+    console.error(error); // O log aparecerá no painel da Vercel
     res.status(500).json({ message: 'Erro interno ao gerar o documento', error: error.message });
   }
 };

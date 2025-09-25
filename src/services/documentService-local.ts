@@ -36,7 +36,7 @@ interface DocumentData {
 }
 
 // URL base da API - aponta para o servidor Express na porta 3001
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const API_BASE_URL = 'http://localhost:3001';
 
 /**
  * Gera um documento usando o servidor Express
