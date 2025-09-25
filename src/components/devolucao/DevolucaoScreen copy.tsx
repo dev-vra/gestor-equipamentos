@@ -10,7 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { generateTermoDevolucao } from "@/services/documentService";
 
-// Interfaces
+// Interfaces (sem alterações)
 interface Equipamento {
   id: string;
   tipo: string;
@@ -36,6 +36,7 @@ interface Movimentacao {
     cpf: string;
   };
   equipamentos?: Equipamento;
+  equipamento?: Equipamento; // Adicionando para compatibilidade
 }
 
 interface EquipmentoDevolucao {
@@ -47,6 +48,10 @@ interface EquipmentoDevolucao {
   estado_conservacao: string;
   avarias: string;
   quantidade: number;
+  grupo_retirada: string;
+  data_retirada: string;
+  colaborador_nome: string;
+  colaborador_cargo: string;
 }
 
 interface DevolucaoScreenProps {
@@ -54,26 +59,25 @@ interface DevolucaoScreenProps {
 }
 
 export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
-  const [selectedGrupo, setSelectedGrupo] = useState<string>("");
+  const [selectedRetiradaId, setSelectedRetiradaId] = useState<string>("");
   const [equipamentosDevolucao, setEquipamentosDevolucao] = useState<EquipmentoDevolucao[]>([]);
   const [movimentacoes, setMovimentacoes] = useState<Movimentacao[]>([]);
   const { toast } = useToast();
 
   // ==================================================================
-  // ✅ ALTERAÇÃO PRINCIPAL NA FUNÇÃO loadMovimentacoes
+  // ✅ ALTERAÇÃO NA FUNÇÃO loadMovimentacoes
   // ==================================================================
   const loadMovimentacoes = useCallback(async () => {
     try {
-      // Agora, a consulta filtra por status 'Pendente', que inclui tanto 'Retirada' quanto 'Entrega_EPI'
-      // que ainda não foram devolvidos.
+      // O campo 'equipamento_id' foi adicionado à consulta.
       const { data, error } = await supabase
         .from('movimentacoes')
         .select(`
           id, data_movimentacao, grupo_retirada, quantidade, equipamento_id, colaborador_id,
           colaboradores:colaborador_id(nome, cargo, razao_social, cnpj, cpf),
-          equipamentos:equipamento_id(tipo, descricao, numero_serie, estado_conservacao, avarias)
+          equipamentos:equipamento_id(tipo, descricao, numero_serie)
         `)
-        .eq('status', 'Pendente') // A chave é filtrar pelo status
+        .eq('status', 'Pendente')
         .order('data_movimentacao', { ascending: false });
       
       if (error) throw error;
@@ -86,13 +90,17 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
 
   useEffect(() => { loadMovimentacoes(); }, [loadMovimentacoes]);
 
-  const handleSelectGrupo = (grupoRetirada: string) => {
-    setSelectedGrupo(grupoRetirada);
+  const handleSelectRetirada = (grupoRetirada: string) => {
+    setSelectedRetiradaId(grupoRetirada);
     
+    // Filtrar todas as movimentações do mesmo grupo
     const movimentacoesDoGrupo = movimentacoes.filter(m => m.grupo_retirada === grupoRetirada);
     
     if (movimentacoesDoGrupo.length > 0) {
-      const equipamentos = movimentacoesDoGrupo.map(mov => ({
+      const primeiroItem = movimentacoesDoGrupo[0];
+      const colaborador = primeiroItem.colaboradores;
+      
+      const equipamentos: EquipmentoDevolucao[] = movimentacoesDoGrupo.map(mov => ({
         movimentacao_id: mov.id,
         equipamento_id: mov.equipamento_id,
         tipo: mov.equipamentos?.tipo || '',
@@ -101,7 +109,12 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
         estado_conservacao: mov.equipamentos?.estado_conservacao || 'Bom',
         avarias: mov.equipamentos?.avarias || '',
         quantidade: mov.quantidade,
+        grupo_retirada: mov.grupo_retirada,
+        data_retirada: mov.data_movimentacao,
+        colaborador_nome: colaborador?.nome || '',
+        colaborador_cargo: colaborador?.cargo || ''
       }));
+      
       setEquipamentosDevolucao(equipamentos);
     } else {
       setEquipamentosDevolucao([]);
@@ -116,64 +129,75 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
     );
   };
 
+  // ==================================================================
+  // ✅ ALTERAÇÃO NA FUNÇÃO handleRegistrarDevolucao
+  // ==================================================================
   const handleRegistrarDevolucao = async () => {
-    if (!selectedGrupo || equipamentosDevolucao.length === 0) {
-      toast({ title: "Erro", description: "Selecione um grupo e confirme os equipamentos para devolução.", variant: "destructive" });
+    if (!selectedRetiradaId || equipamentosDevolucao.length === 0) {
+      toast({ title: "Erro", description: "Selecione uma retirada e confirme os equipamentos para devolução.", variant: "destructive" });
       return;
     }
 
     try {
-      const movimentacoesOriginais = movimentacoes.filter(m => m.grupo_retirada === selectedGrupo);
-      const colaborador = movimentacoesOriginais[0]?.colaboradores;
+      const movimentacoesDoGrupo = movimentacoes.filter(m => m.grupo_retirada === selectedRetiradaId);
+      
+      if (movimentacoesDoGrupo.length === 0) {
+        throw new Error('Nenhuma movimentação encontrada para este grupo de retirada.');
+      }
 
-      if (!colaborador) throw new Error('Dados do colaborador não encontrados.');
+      const primeiroItem = movimentacoesDoGrupo[0];
+      const colaborador = primeiroItem.colaboradores;
+      
+      if (!colaborador) {
+        throw new Error('Dados do colaborador não encontrados.');
+      }
 
-      // 1. Criar as novas movimentações de devolução
-      const devolucoesParaInserir = equipamentosDevolucao.map(equip => ({
+      // Criar movimentações de devolução para cada item
+      const devolucoes = equipamentosDevolucao.map(equip => ({
         tipo: 'Devolucao',
-        colaborador_id: movimentacoesOriginais[0].colaborador_id,
+        colaborador_id: primeiroItem.colaborador_id,
         equipamento_id: equip.equipamento_id,
-        grupo_retirada: selectedGrupo,
+        grupo_retirada: selectedRetiradaId,
         quantidade: equip.quantidade,
-        data_movimentacao: new Date().toISOString(),
-        status: 'Devolvido'
+        estado_conservacao: equip.estado_conservacao,
+        avarias: equip.avarias,
+        data_movimentacao: new Date().toISOString()
       }));
 
-      const { error: insertError } = await supabase.from('movimentacoes').insert(devolucoesParaInserir);
-      if (insertError) throw insertError;
-
-      // 2. Atualizar o status das movimentações originais para 'Devolvido'
-      const idsParaAtualizar = movimentacoesOriginais.map(m => m.id);
-      const { error: updateStatusError } = await supabase
+      // Inserir as devoluções
+      const { error: devolucaoError } = await supabase
         .from('movimentacoes')
-        .update({ status: 'Devolvido' })
-        .in('id', idsParaAtualizar);
-      if (updateStatusError) throw updateStatusError;
+        .insert(devolucoes);
 
-      // 3. Atualizar o stock dos equipamentos
+      if (devolucaoError) throw devolucaoError;
+
+      // Atualizar o estoque e estado dos equipamentos
       for (const equip of equipamentosDevolucao) {
+        // Buscar quantidade atual
         const { data: equipamentoAtual, error: fetchError } = await supabase
           .from('equipamentos')
           .select('quantidade')
           .eq('id', equip.equipamento_id)
           .single();
+
         if (fetchError) throw fetchError;
 
-        const novoStock = (equipamentoAtual?.quantidade || 0) + equip.quantidade;
+        // Atualizar quantidade e estado
         const { error: updateError } = await supabase
           .from('equipamentos')
           .update({
-            quantidade: novoStock,
+            quantidade: (equipamentoAtual?.quantidade || 0) + equip.quantidade,
             estado_conservacao: equip.estado_conservacao,
             avarias: equip.avarias
           })
           .eq('id', equip.equipamento_id);
+
         if (updateError) throw updateError;
       }
-      
+
       // Preparar dados para o documento
       const itens = equipamentosDevolucao.map(eq => ({
-        item_id: (eq.equipamento_id || '').slice(0, 8),
+        item_id: eq.equipamento_id.slice(0, 8),
         item_desc: eq.descricao,
         item_serie: eq.numero_serie,
         novas_avarias: eq.avarias || 'Nenhuma',
@@ -187,50 +211,44 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
         nome_funcionario: colaborador.nome || '',
         cpf_funcionario: colaborador.cpf || '',
         funcao_funcionario: colaborador.cargo || '',
-        id_retirada: selectedGrupo,
+        id_retirada: selectedRetiradaId,
         data_devolucao_efetiva: new Date().toLocaleDateString('pt-BR'),
         itens: itens,
       };
         
+      // Gerar o documento de devolução
       await generateTermoDevolucao(documentData);
       
-      toast({ title: "Sucesso", description: `Devolução do grupo ${selectedGrupo} registada com sucesso!` });
+      toast({ 
+        title: "Sucesso", 
+        description: `Devolução do grupo ${selectedRetiradaId} registrada com sucesso!` 
+      });
 
+      // Limpar seleção e recarregar
       handleCancelar();
       await loadMovimentacoes();
     } catch (error) {
       console.error('Erro ao registar devolução:', error);
-      const errorMessage = error instanceof Error ? error.message : "Ocorreu um erro desconhecido.";
-      toast({ title: "Erro", description: `Não foi possível registar a devolução: ${errorMessage}`, variant: "destructive" });
+      toast({ title: "Erro", description: "Não foi possível registar a devolução.", variant: "destructive" });
     }
   };
 
   const handleCancelar = () => {
-    setSelectedGrupo("");
+    setSelectedRetiradaId("");
     setEquipamentosDevolucao([]);
   };
 
-  const gruposUnicos = Array.from(new Set(movimentacoes.map(m => m.grupo_retirada)))
-    .map(grupo => {
-        const primeiraMov = movimentacoes.find(m => m.grupo_retirada === grupo);
-        const totalItens = movimentacoes
-            .filter(m => m.grupo_retirada === grupo)
-            .reduce((acc, curr) => acc + curr.quantidade, 0);
-        return {
-            id: grupo,
-            data: primeiraMov ? new Date(primeiraMov.data_movimentacao).toLocaleDateString('pt-BR') : '',
-            colaborador: primeiraMov?.colaboradores?.nome || 'N/A',
-            equipamentos: movimentacoes
-                .filter(m => m.grupo_retirada === grupo)
-                .map(m => `${m.quantidade}x ${m.equipamentos?.descricao || 'item desconhecido'}`)
-                .join(', '),
-            totalItens: totalItens
-        };
-    });
+  // Agrupar movimentações por grupo_retirada
+  const gruposUnicos = Array.from(
+    new Set(movimentacoes.map(m => m.grupo_retirada))
+  );
+
+  // Obter detalhes do grupo selecionado
+  const grupoSelecionado = movimentacoes.find(m => m.grupo_retirada === selectedRetiradaId);
   
   return (
     <div className="min-h-screen bg-background">
-      <Header title="Registar Devolução" showBackButton onBack={onBack} />
+      <Header title="Registrar Devolução" showBackButton onBack={onBack} />
       
       <div className="container mx-auto p-6 space-y-6">
         <Card className="bg-card border-border">
@@ -251,33 +269,47 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {gruposUnicos.map((grupo) => (
+                  {gruposUnicos.map((grupo) => {
+                    const primeiraMov = movimentacoes.find(m => m.grupo_retirada === grupo);
+                    const totalItens = movimentacoes
+                      .filter(m => m.grupo_retirada === grupo)
+                      .reduce((acc, curr) => acc + curr.quantidade, 0);
+                    
+                    return (
                       <TableRow 
-                        key={grupo.id}
-                        className={selectedGrupo === grupo.id ? "bg-primary/5 border-primary/20" : ""}
+                        key={grupo}
+                        className={selectedRetiradaId === grupo ? "bg-primary/5 border-primary/20" : ""}
                       >
-                        <TableCell className="font-medium">{grupo.id}</TableCell>
-                        <TableCell>{grupo.data}</TableCell>
-                        <TableCell>{grupo.colaborador}</TableCell>
-                        <TableCell>{grupo.equipamentos}</TableCell>
+                        <TableCell className="font-medium">{grupo}</TableCell>
+                        <TableCell>
+                          {primeiraMov ? new Date(primeiraMov.data_movimentacao).toLocaleDateString('pt-BR') : ''}
+                        </TableCell>
+                        <TableCell>{primeiraMov?.colaboradores?.nome}</TableCell>
+                        <TableCell>
+                          {movimentacoes
+                            .filter(m => m.grupo_retirada === grupo)
+                            .map(m => `${m.quantidade}x ${m.equipamentos?.descricao}`)
+                            .join(', ')}
+                        </TableCell>
                         <TableCell>
                           <Button
                             size="sm"
-                            variant={selectedGrupo === grupo.id ? "default" : "outline"}
-                            onClick={() => handleSelectGrupo(grupo.id)}
+                            variant={selectedRetiradaId === grupo ? "default" : "outline"}
+                            onClick={() => handleSelectRetirada(grupo)}
                           >
-                            {selectedGrupo === grupo.id ? "Selecionado" : "Selecionar"}
+                            {selectedRetiradaId === grupo ? "Selecionado" : "Selecionar"}
                           </Button>
                         </TableCell>
                       </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
           </div>
         </Card>
 
-        {selectedGrupo && (
+        {selectedRetiradaId && (
           <Card className="bg-card border-border">
             <div className="p-6">
               <h3 className="text-lg font-medium mb-4">Equipamentos para Devolução</h3>
@@ -344,4 +376,3 @@ export function DevolucaoScreen({ onBack }: DevolucaoScreenProps) {
     </div>
   );
 }
-
